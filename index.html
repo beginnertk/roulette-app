@@ -15,14 +15,16 @@
             min-height: 100vh;
             margin: 0;
             color: #333;
+            padding: 20px;
+            box-sizing: border-box;
         }
-        h1 { margin-bottom: 20px; font-size: 1.4rem; letter-spacing: 0.05em; }
+        h1 { margin-bottom: 10px; font-size: 1.4rem; letter-spacing: 0.05em; }
         
         .wheel-container {
             position: relative;
             width: 300px;
             height: 300px;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
         }
         canvas {
             width: 100%;
@@ -49,8 +51,8 @@
             flex-direction: column;
             align-items: center;
             gap: 15px;
-            width: 90%;
-            max-width: 350px;
+            width: 100%;
+            max-width: 400px;
         }
         
         button#spinBtn {
@@ -63,53 +65,77 @@
             border-radius: 50px;
             cursor: pointer;
             box-shadow: 0 4px 10px rgba(46, 213, 115, 0.3);
-            transition: transform 0.1s;
+            transition: transform 0.1s, background-color 0.3s;
         }
         button#spinBtn:active { transform: scale(0.98); }
-        button:disabled { background-color: #ccc; cursor: wait; box-shadow: none; }
+        button:disabled { background-color: #ccc !important; cursor: wait; box-shadow: none; }
 
         .result {
-            margin-top: 15px;
+            margin-top: 10px;
+            margin-bottom: 20px;
             font-size: 1.4rem;
             font-weight: bold;
             min-height: 1.5em;
             text-align: center;
         }
 
-        /* 追加フォームのデザイン */
-        .add-form {
-            margin-top: 30px;
-            padding: 20px;
-            background: white;
-            border-radius: 15px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        /* 編集エリアのデザイン（初期のUIを再現・強化） */
+        details {
             width: 100%;
-            box-sizing: border-box;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            overflow: hidden;
+            transition: all 0.3s;
         }
-        .input-group {
+        summary {
+            padding: 15px;
+            font-weight: bold;
+            color: #555;
+            cursor: pointer;
+            list-style: none; /* デフォルトの▲を消す（一部ブラウザ用） */
             display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        summary::-webkit-details-marker { display: none; }
+        summary::after { content: '+'; font-size: 1.2rem; }
+        details[open] summary::after { content: '-'; }
+        details[open] summary { border-bottom: 1px solid #eee; }
+
+        .edit-area {
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
             gap: 10px;
         }
-        input[type="text"] {
-            flex: 1;
+        textarea {
+            width: 100%;
+            height: 150px;
             padding: 10px;
             border: 1px solid #ddd;
             border-radius: 8px;
             font-size: 1rem;
-            outline: none;
+            resize: vertical;
+            box-sizing: border-box;
+            font-family: inherit;
         }
-        button#addBtn {
+        .action-btns {
+            display: flex;
+            justify-content: flex-end;
+        }
+        button.save-btn {
             background-color: #5352ed;
             color: white;
             border: none;
-            padding: 10px 20px;
+            padding: 10px 25px;
             border-radius: 8px;
-            cursor: pointer;
             font-weight: bold;
+            cursor: pointer;
         }
-        button#addBtn:disabled { background-color: #a4a4f0; }
-
-        .status-msg { font-size: 0.8rem; color: #666; margin-top: 5px; }
+        button.save-btn:disabled { background-color: #a4a4f0; }
+        
+        .status-msg { font-size: 0.8rem; color: #666; text-align: right; min-height: 1.2em; }
     </style>
 </head>
 <body>
@@ -126,14 +152,19 @@
     <div class="controls">
         <button id="spinBtn" onclick="spin()" disabled>読み込み中...</button>
         
-        <div class="add-form">
-            <div style="font-size:0.9rem; margin-bottom:8px; color:#555;">メニューを追加</div>
-            <div class="input-group">
-                <input type="text" id="newMenuInput" placeholder="例: 生姜焼き">
-                <button id="addBtn" onclick="addMenu()">追加</button>
+        <details id="editDetails">
+            <summary>メニューリストを編集・閲覧</summary>
+            <div class="edit-area">
+                <div style="font-size:0.8rem; color:#888;">
+                    改行で区切って入力してください。<br>「保存」を押すとスプレッドシートも更新されます。
+                </div>
+                <textarea id="menuTextarea" placeholder="読み込み中..."></textarea>
+                <div id="statusMsg" class="status-msg"></div>
+                <div class="action-btns">
+                    <button class="save-btn" id="saveBtn" onclick="saveAllMenu()">全データを保存して更新</button>
+                </div>
             </div>
-            <div id="statusMsg" class="status-msg">リスト取得中...</div>
-        </div>
+        </details>
     </div>
 
     <script>
@@ -147,9 +178,9 @@
         const ctx = canvas.getContext('2d');
         const spinBtn = document.getElementById('spinBtn');
         const resultText = document.getElementById('resultText');
+        const menuTextarea = document.getElementById('menuTextarea');
+        const saveBtn = document.getElementById('saveBtn');
         const statusMsg = document.getElementById('statusMsg');
-        const addBtn = document.getElementById('addBtn');
-        const newMenuInput = document.getElementById('newMenuInput');
 
         let currentAngle = 0;
         let isSpinning = false;
@@ -158,62 +189,85 @@
         // データの読み込み (GET)
         async function loadMenu() {
             try {
-                addBtn.disabled = true;
+                saveBtn.disabled = true;
+                statusMsg.innerText = "データを取得中...";
+                
                 const response = await fetch(API_URL);
                 const data = await response.json();
                 
                 items = data;
                 
-                if (items.length < 2) {
-                    statusMsg.innerText = "メニューを2つ以上登録してください";
-                    return;
-                }
+                // テキストエリアに反映（改行区切り）
+                menuTextarea.value = items.join("\n");
 
-                drawWheel();
-                spinBtn.disabled = false;
-                spinBtn.innerText = "START";
-                addBtn.disabled = false;
-                statusMsg.innerText = `現在のメニュー数: ${items.length}品`;
+                if (items.length < 2) {
+                    statusMsg.innerText = "メニューが少なすぎます";
+                    resultText.innerText = "メニューを追加してください";
+                } else {
+                    statusMsg.innerText = `取得完了: ${items.length}件`;
+                    spinBtn.disabled = false;
+                    spinBtn.innerText = "START";
+                    drawWheel();
+                }
+                saveBtn.disabled = false;
 
             } catch (error) {
                 console.error(error);
-                statusMsg.innerText = "読み込み失敗。通信環境を確認してください。";
+                statusMsg.innerText = "読み込み失敗";
+                resultText.innerText = "通信エラー";
             }
         }
 
-        // メニューの追加 (POST)
-        async function addMenu() {
-            const val = newMenuInput.value.trim();
-            if (!val) return;
+        // 全データの保存 (POST: replaceアクション)
+        async function saveAllMenu() {
+            const rawText = menuTextarea.value;
+            // 空行を除去して配列化
+            const newItems = rawText.split("\n").map(s => s.trim()).filter(s => s !== "");
 
-            addBtn.disabled = true;
-            addBtn.innerText = "...";
+            if (newItems.length < 2) {
+                alert("メニューは最低2つ以上登録してください");
+                return;
+            }
+
+            if (!confirm("現在のリストを上書き保存しますか？\n（スプレッドシートの内容も更新されます）")) {
+                return;
+            }
+
+            saveBtn.disabled = true;
+            saveBtn.innerText = "保存中...";
+            spinBtn.disabled = true;
             statusMsg.innerText = "スプレッドシートに書き込み中...";
 
             try {
-                // GASへのPOST送信には少し工夫が必要（no-cors等は使わず、text/plainで送ってGAS側でパースする手法が安定します）
+                // replaceアクションを指定して送信
                 const response = await fetch(API_URL, {
                     method: 'POST',
-                    body: JSON.stringify({ menu: val })
+                    body: JSON.stringify({ 
+                        action: 'replace',
+                        menuList: newItems 
+                    })
                 });
                 
                 const result = await response.json();
 
                 if (result.success) {
-                    newMenuInput.value = "";
-                    statusMsg.innerText = "追加成功！リストを更新します...";
-                    await loadMenu(); // リストを再読み込みしてルーレットを更新
+                    statusMsg.innerText = "保存完了！リストを更新しました";
+                    // 成功したら読み込み直してルーレット更新
+                    await loadMenu(); 
+                    saveBtn.innerText = "全データを保存して更新";
+                    // 編集エリアを閉じる（お好みで）
+                    // document.getElementById('editDetails').removeAttribute('open');
                 } else {
-                    statusMsg.innerText = result.message;
-                    addBtn.disabled = false;
-                    addBtn.innerText = "追加";
+                    alert("保存エラー: " + result.message);
+                    saveBtn.disabled = false;
+                    saveBtn.innerText = "全データを保存して更新";
                 }
 
             } catch (error) {
                 console.error(error);
-                statusMsg.innerText = "書き込みエラー。";
-                addBtn.disabled = false;
-                addBtn.innerText = "追加";
+                alert("通信エラーが発生しました");
+                saveBtn.disabled = false;
+                saveBtn.innerText = "全データを保存して更新";
             }
         }
 
@@ -247,7 +301,7 @@
             isSpinning = true;
             resultText.innerText = "";
             spinBtn.disabled = true;
-            addBtn.disabled = true; // 回転中は追加禁止
+            saveBtn.disabled = true;
 
             const spinAngle = Math.random() * 2000 + 3000; 
             currentAngle += spinAngle;
@@ -256,7 +310,7 @@
             setTimeout(() => {
                 isSpinning = false;
                 spinBtn.disabled = false;
-                addBtn.disabled = false;
+                saveBtn.disabled = false;
                 
                 const degrees = currentAngle % 360;
                 const arc = 360 / items.length;
