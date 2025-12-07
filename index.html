@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>自炊ルーレット</title>
+    <title>自炊メニュールーレット</title>
     <style>
+        /* スタイルは前回と同じですが、読み込み中の表示を追加しています */
         body {
             font-family: 'Helvetica Neue', Arial, sans-serif;
             background-color: #f0f2f5;
@@ -17,8 +18,6 @@
             overflow: hidden;
         }
         h1 { color: #333; margin-bottom: 20px; font-size: 1.5rem; }
-        
-        /* ルーレット（円盤）のスタイル */
         .wheel-container {
             position: relative;
             width: 300px;
@@ -28,10 +27,9 @@
         canvas {
             width: 100%;
             height: 100%;
-            transform: rotate(0deg);
-            transition: transform 4s cubic-bezier(0.25, 0.1, 0.25, 1);
             border-radius: 50%;
             box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            transition: transform 4s cubic-bezier(0.25, 0.1, 0.25, 1);
         }
         .pointer {
             position: absolute;
@@ -45,15 +43,11 @@
             border-top: 25px solid #ff4757;
             z-index: 10;
         }
-
-        /* コントロール周り */
         .controls {
             display: flex;
-            gap: 10px;
             flex-direction: column;
             align-items: center;
-            width: 90%;
-            max-width: 400px;
+            gap: 15px;
         }
         button {
             background-color: #2ed573;
@@ -65,14 +59,8 @@
             border-radius: 50px;
             cursor: pointer;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            transition: transform 0.1s, box-shadow 0.1s;
-        }
-        button:active {
-            transform: scale(0.98);
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         button:disabled { background-color: #ccc; cursor: not-allowed; }
-
         .result {
             margin-top: 20px;
             font-size: 1.5rem;
@@ -80,30 +68,10 @@
             color: #333;
             min-height: 1.5em;
         }
-        
-        /* リスト編集エリア */
-        details {
-            margin-top: 20px;
-            width: 100%;
-            max-width: 300px;
-            font-size: 0.9rem;
+        .loading {
             color: #666;
-        }
-        textarea {
-            width: 100%;
-            height: 100px;
-            margin-top: 5px;
-            padding: 5px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-        }
-        .update-btn {
-            background-color: #5352ed;
-            padding: 8px 20px;
             font-size: 0.9rem;
-            margin-top: 5px;
         }
-
     </style>
 </head>
 <body>
@@ -118,51 +86,78 @@
     <div class="result" id="resultText"></div>
 
     <div class="controls">
-        <button id="spinBtn" onclick="spin()">START</button>
+        <button id="spinBtn" onclick="spin()" disabled>読み込み中...</button>
+        <div id="statusMsg" class="loading">スプレッドシートからメニューを取得しています...</div>
         
-        <details>
-            <summary>メニューリストを編集（重複は自動削除）</summary>
-            <textarea id="menuInput"></textarea>
-            <button class="update-btn" onclick="updateMenu()">リスト更新</button>
-        </details>
+        <a href="https://docs.google.com/spreadsheets" target="_blank" style="font-size:0.8rem; color:#999; text-decoration:none;">
+            [管理者用] メニューを編集する
+        </a>
     </div>
 
     <script>
-        // 動画から抽出した初期データ
-        let items = [
-            "炒飯", "麻婆豆腐", "天津飯", "スタミナ丼", "エビチリ", 
-            "回鍋肉", "棒々鶏", "焼きそば", "牛丼", "親子丼", 
-            "魯肉飯", "鮪アボカド丼", "豚丼", "三食丼", "ハンバーグ", 
-            "グラタン", "ビーフストロガノフ", "チキンソテー", "カルボナーラ", 
-            "ペペロンチーノ", "うどん", "豚シャブサラダ", "カレーオムライス", 
-            "肉じゃが", "筑前煮", "チゲ鍋", "白菜豚バラ鍋", "豆乳坦々鍋", 
-            "鶏キャベ塩大蒜鍋", "プルコギ", "味噌煮込み鍋", "おでん", 
-            "肉豆腐", "ピーマン肉詰め", "木場くぼの豚丼"
-        ];
+        // ==========================================
+        // ↓↓↓ ここに「公開したCSVのURL」を貼ってください ↓↓↓
+        const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS9vcpgJamGRKg4euxd_i53o_fMAYU4BSP5KLozymwX6Dz5RRYOrJBU_Z8s5pRYxp7rTo_QmPVyakNj/pub?output=csv'; 
+        // ==========================================
 
+        let items = []; // スプレッドシートから読み込んだデータをここに入れます
         const canvas = document.getElementById('wheelCanvas');
         const ctx = canvas.getContext('2d');
         const spinBtn = document.getElementById('spinBtn');
         const resultText = document.getElementById('resultText');
-        const menuInput = document.getElementById('menuInput');
+        const statusMsg = document.getElementById('statusMsg');
 
         let currentAngle = 0;
         let isSpinning = false;
-
-        // 色のパレット（洗練された配色）
         const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE'];
 
-        function init() {
-            // 重複排除してソート
-            items = [...new Set(items)].filter(i => i.trim() !== "");
-            menuInput.value = items.join("\n");
-            drawWheel();
+        // 起動時にスプレッドシートを読みに行く
+        async function loadMenu() {
+            try {
+                const response = await fetch(SHEET_CSV_URL);
+                if (!response.ok) throw new Error('Network response was not ok');
+                
+                const text = await response.text();
+                
+                // CSVを配列に変換（改行で区切る）
+                const rows = text.split('\n').map(row => row.trim());
+                
+                // 1行目はヘッダー（「メニュー」などの文字）と仮定して削除してもいいですが、
+                // 今回は「空行」と「重複」を削除するだけにします
+                // 1行目のヘッダーを除外したい場合は .slice(1) を使います
+                
+                // 重複排除セット
+                const uniqueItems = new Set();
+                
+                rows.forEach(row => {
+                    // カンマが含まれている場合の簡易処理（今回は単純なリスト想定）
+                    const cleanRow = row.replace(/['"]+/g, ''); 
+                    if (cleanRow && cleanRow !== "メニュー") { // "メニュー"という文字は除外
+                        uniqueItems.add(cleanRow);
+                    }
+                });
+
+                items = Array.from(uniqueItems);
+
+                if (items.length < 2) {
+                    statusMsg.innerText = "データ不足: スプレッドシートにメニューを2つ以上書いてください";
+                    return;
+                }
+
+                drawWheel();
+                spinBtn.disabled = false;
+                spinBtn.innerText = "START";
+                statusMsg.innerText = `メニュー数: ${items.length}品`;
+
+            } catch (error) {
+                console.error(error);
+                statusMsg.innerText = "エラー: データの読み込みに失敗しました。URLを確認してください。";
+            }
         }
 
         function drawWheel() {
             const arc = 2 * Math.PI / items.length;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
             const radius = canvas.width / 2;
             const centerX = canvas.width / 2;
             const centerY = canvas.height / 2;
@@ -175,8 +170,6 @@
                 ctx.arc(centerX, centerY, radius, angle, angle + arc);
                 ctx.fill();
                 ctx.save();
-
-                // テキスト描画
                 ctx.translate(centerX, centerY);
                 ctx.rotate(angle + arc / 2);
                 ctx.textAlign = "right";
@@ -193,52 +186,24 @@
             resultText.innerText = "";
             spinBtn.disabled = true;
 
-            // 回転ロジック
-            const spinAngle = Math.random() * 2000 + 3000; // 最低3000度以上回る
+            const spinAngle = Math.random() * 2000 + 3000; 
             currentAngle += spinAngle;
-            
             canvas.style.transform = `rotate(-${currentAngle}deg)`;
 
-            // アニメーション終了時の判定（4秒後）
             setTimeout(() => {
                 isSpinning = false;
                 spinBtn.disabled = false;
-                
-                // 当たり判定の計算
                 const degrees = currentAngle % 360;
                 const arc = 360 / items.length;
-                // 針は上（270度/90度地点）にあるが、Canvasの回転はCSSで行っているため
-                // 実際の計算は少し複雑になりますが、実用上は「上に来た項目」を表示します
                 const index = Math.floor((360 - degrees + 90) % 360 / arc); 
-                const winner = items[index >= items.length ? 0 : index]; // インデックス補正
-                
+                const winner = items[index >= items.length ? 0 : index]; 
                 resultText.innerText = "今夜は「" + winner + "」に決定！";
             }, 4000);
         }
 
-        function updateMenu() {
-            const rawText = menuInput.value;
-            // 改行で分割し、空白を除去し、重複を排除（Setを使用）
-            const newItems = rawText.split("\n").map(s => s.trim()).filter(s => s !== "");
-            const uniqueItems = [...new Set(newItems)];
-
-            if (uniqueItems.length < 2) {
-                alert("メニューは最低2つ以上登録してください");
-                return;
-            }
-
-            items = uniqueItems;
-            // 入力欄も綺麗な状態（重複なし）に戻す
-            menuInput.value = items.join("\n");
-            
-            drawWheel();
-            alert("リストを更新しました。重複は自動的に削除されました。");
-        }
-
-        // 初期化実行
-        init();
+        // 実行開始
+        loadMenu();
 
     </script>
 </body>
-
 </html>
