@@ -5,19 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>自炊メニュールーレット</title>
     <style>
-        /* スタイルは前回と同じですが、読み込み中の表示を追加しています */
         body {
             font-family: 'Helvetica Neue', Arial, sans-serif;
-            background-color: #f0f2f5;
+            background-color: #f8f9fa;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            height: 100vh;
+            min-height: 100vh;
             margin: 0;
-            overflow: hidden;
+            color: #333;
         }
-        h1 { color: #333; margin-bottom: 20px; font-size: 1.5rem; }
+        h1 { margin-bottom: 20px; font-size: 1.4rem; letter-spacing: 0.05em; }
+        
         .wheel-container {
             position: relative;
             width: 300px;
@@ -28,12 +28,12 @@
             width: 100%;
             height: 100%;
             border-radius: 50%;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
             transition: transform 4s cubic-bezier(0.25, 0.1, 0.25, 1);
         }
         .pointer {
             position: absolute;
-            top: -10px;
+            top: -12px;
             left: 50%;
             transform: translateX(-50%);
             width: 0;
@@ -43,40 +43,78 @@
             border-top: 25px solid #ff4757;
             z-index: 10;
         }
+
         .controls {
             display: flex;
             flex-direction: column;
             align-items: center;
             gap: 15px;
+            width: 90%;
+            max-width: 350px;
         }
-        button {
+        
+        button#spinBtn {
             background-color: #2ed573;
             color: white;
             border: none;
-            padding: 15px 40px;
+            padding: 15px 50px;
             font-size: 1.2rem;
             font-weight: bold;
             border-radius: 50px;
             cursor: pointer;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 10px rgba(46, 213, 115, 0.3);
+            transition: transform 0.1s;
         }
-        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        button#spinBtn:active { transform: scale(0.98); }
+        button:disabled { background-color: #ccc; cursor: wait; box-shadow: none; }
+
         .result {
-            margin-top: 20px;
-            font-size: 1.5rem;
+            margin-top: 15px;
+            font-size: 1.4rem;
             font-weight: bold;
-            color: #333;
             min-height: 1.5em;
+            text-align: center;
         }
-        .loading {
-            color: #666;
-            font-size: 0.9rem;
+
+        /* 追加フォームのデザイン */
+        .add-form {
+            margin-top: 30px;
+            padding: 20px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            width: 100%;
+            box-sizing: border-box;
         }
+        .input-group {
+            display: flex;
+            gap: 10px;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 1rem;
+            outline: none;
+        }
+        button#addBtn {
+            background-color: #5352ed;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button#addBtn:disabled { background-color: #a4a4f0; }
+
+        .status-msg { font-size: 0.8rem; color: #666; margin-top: 5px; }
     </style>
 </head>
 <body>
 
-    <h1>今日の献立は...？</h1>
+    <h1>自炊メニュールーレット</h1>
 
     <div class="wheel-container">
         <div class="pointer"></div>
@@ -87,71 +125,95 @@
 
     <div class="controls">
         <button id="spinBtn" onclick="spin()" disabled>読み込み中...</button>
-        <div id="statusMsg" class="loading">スプレッドシートからメニューを取得しています...</div>
         
-        <a href="https://docs.google.com/spreadsheets" target="_blank" style="font-size:0.8rem; color:#999; text-decoration:none;">
-            [管理者用] メニューを編集する
-        </a>
+        <div class="add-form">
+            <div style="font-size:0.9rem; margin-bottom:8px; color:#555;">メニューを追加</div>
+            <div class="input-group">
+                <input type="text" id="newMenuInput" placeholder="例: 生姜焼き">
+                <button id="addBtn" onclick="addMenu()">追加</button>
+            </div>
+            <div id="statusMsg" class="status-msg">リスト取得中...</div>
+        </div>
     </div>
 
     <script>
         // ==========================================
-        // ↓↓↓ ここに「公開したCSVのURL」を貼ってください ↓↓↓
-        const SHEET_CSV_URL = 'https://script.google.com/macros/s/AKfycbxYU09ah3StJWFfC5JQvNkli8-kvZYHNoVGK9LYf2KyP7P_GFN0NR30-qegd6cXLMwS9g/exec'; 
+        // ↓↓↓ ここにGASのウェブアプリURLを貼ってください ↓↓↓
+        const API_URL = "https://script.google.com/macros/s/AKfycbxYU09ah3StJWFfC5JQvNkli8-kvZYHNoVGK9LYf2KyP7P_GFN0NR30-qegd6cXLMwS9g/exec"; 
         // ==========================================
 
-        let items = []; // スプレッドシートから読み込んだデータをここに入れます
+        let items = []; 
         const canvas = document.getElementById('wheelCanvas');
         const ctx = canvas.getContext('2d');
         const spinBtn = document.getElementById('spinBtn');
         const resultText = document.getElementById('resultText');
         const statusMsg = document.getElementById('statusMsg');
+        const addBtn = document.getElementById('addBtn');
+        const newMenuInput = document.getElementById('newMenuInput');
 
         let currentAngle = 0;
         let isSpinning = false;
         const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE'];
 
-        // 起動時にスプレッドシートを読みに行く
+        // データの読み込み (GET)
         async function loadMenu() {
             try {
-                const response = await fetch(SHEET_CSV_URL);
-                if (!response.ok) throw new Error('Network response was not ok');
+                addBtn.disabled = true;
+                const response = await fetch(API_URL);
+                const data = await response.json();
                 
-                const text = await response.text();
+                items = data;
                 
-                // CSVを配列に変換（改行で区切る）
-                const rows = text.split('\n').map(row => row.trim());
-                
-                // 1行目はヘッダー（「メニュー」などの文字）と仮定して削除してもいいですが、
-                // 今回は「空行」と「重複」を削除するだけにします
-                // 1行目のヘッダーを除外したい場合は .slice(1) を使います
-                
-                // 重複排除セット
-                const uniqueItems = new Set();
-                
-                rows.forEach(row => {
-                    // カンマが含まれている場合の簡易処理（今回は単純なリスト想定）
-                    const cleanRow = row.replace(/['"]+/g, ''); 
-                    if (cleanRow && cleanRow !== "メニュー") { // "メニュー"という文字は除外
-                        uniqueItems.add(cleanRow);
-                    }
-                });
-
-                items = Array.from(uniqueItems);
-
                 if (items.length < 2) {
-                    statusMsg.innerText = "データ不足: スプレッドシートにメニューを2つ以上書いてください";
+                    statusMsg.innerText = "メニューを2つ以上登録してください";
                     return;
                 }
 
                 drawWheel();
                 spinBtn.disabled = false;
                 spinBtn.innerText = "START";
-                statusMsg.innerText = `メニュー数: ${items.length}品`;
+                addBtn.disabled = false;
+                statusMsg.innerText = `現在のメニュー数: ${items.length}品`;
 
             } catch (error) {
                 console.error(error);
-                statusMsg.innerText = "エラー: データの読み込みに失敗しました。URLを確認してください。";
+                statusMsg.innerText = "読み込み失敗。通信環境を確認してください。";
+            }
+        }
+
+        // メニューの追加 (POST)
+        async function addMenu() {
+            const val = newMenuInput.value.trim();
+            if (!val) return;
+
+            addBtn.disabled = true;
+            addBtn.innerText = "...";
+            statusMsg.innerText = "スプレッドシートに書き込み中...";
+
+            try {
+                // GASへのPOST送信には少し工夫が必要（no-cors等は使わず、text/plainで送ってGAS側でパースする手法が安定します）
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({ menu: val })
+                });
+                
+                const result = await response.json();
+
+                if (result.success) {
+                    newMenuInput.value = "";
+                    statusMsg.innerText = "追加成功！リストを更新します...";
+                    await loadMenu(); // リストを再読み込みしてルーレットを更新
+                } else {
+                    statusMsg.innerText = result.message;
+                    addBtn.disabled = false;
+                    addBtn.innerText = "追加";
+                }
+
+            } catch (error) {
+                console.error(error);
+                statusMsg.innerText = "書き込みエラー。";
+                addBtn.disabled = false;
+                addBtn.innerText = "追加";
             }
         }
 
@@ -185,6 +247,7 @@
             isSpinning = true;
             resultText.innerText = "";
             spinBtn.disabled = true;
+            addBtn.disabled = true; // 回転中は追加禁止
 
             const spinAngle = Math.random() * 2000 + 3000; 
             currentAngle += spinAngle;
@@ -193,18 +256,18 @@
             setTimeout(() => {
                 isSpinning = false;
                 spinBtn.disabled = false;
+                addBtn.disabled = false;
+                
                 const degrees = currentAngle % 360;
                 const arc = 360 / items.length;
                 const index = Math.floor((360 - degrees + 90) % 360 / arc); 
                 const winner = items[index >= items.length ? 0 : index]; 
-                resultText.innerText = "今夜は「" + winner + "」に決定！";
+                resultText.innerText = "今夜は「" + winner + "」";
             }, 4000);
         }
 
-        // 実行開始
         loadMenu();
 
     </script>
 </body>
 </html>
-
