@@ -65,7 +65,7 @@
             border-radius: 50px;
             cursor: pointer;
             box-shadow: 0 4px 10px rgba(46, 213, 115, 0.3);
-            transition: transform 0.1s, background-color 0.3s;
+            transition: transform 0.1s;
         }
         button#spinBtn:active { transform: scale(0.98); }
         button:disabled { background-color: #ccc !important; cursor: wait; box-shadow: none; }
@@ -79,28 +79,61 @@
             text-align: center;
         }
 
-        /* 編集エリアのデザイン（初期のUIを再現・強化） */
+        /* --- 新規追加エリア --- */
+        .quick-add {
+            width: 100%;
+            background: white;
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            box-sizing: border-box;
+        }
+        .input-group {
+            display: flex;
+            gap: 8px;
+        }
+        input#quickInput {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 1rem;
+            outline: none;
+        }
+        button#addBtn {
+            background-color: #5352ed;
+            color: white;
+            border: none;
+            padding: 0 20px;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        button#addBtn:disabled { background-color: #a4a4f0; }
+
+        /* --- 編集・閲覧エリア --- */
         details {
             width: 100%;
             background: white;
             border-radius: 12px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.05);
             overflow: hidden;
-            transition: all 0.3s;
+            margin-top: 10px;
         }
         summary {
             padding: 15px;
             font-weight: bold;
             color: #555;
             cursor: pointer;
-            list-style: none; /* デフォルトの▲を消す（一部ブラウザ用） */
+            list-style: none;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
         summary::-webkit-details-marker { display: none; }
-        summary::after { content: '+'; font-size: 1.2rem; }
-        details[open] summary::after { content: '-'; }
+        summary::after { content: '▼'; font-size: 0.8rem; color: #999; }
+        details[open] summary::after { content: '▲'; }
         details[open] summary { border-bottom: 1px solid #eee; }
 
         .edit-area {
@@ -125,7 +158,7 @@
             justify-content: flex-end;
         }
         button.save-btn {
-            background-color: #5352ed;
+            background-color: #747d8c;
             color: white;
             border: none;
             padding: 10px 25px;
@@ -133,9 +166,8 @@
             font-weight: bold;
             cursor: pointer;
         }
-        button.save-btn:disabled { background-color: #a4a4f0; }
         
-        .status-msg { font-size: 0.8rem; color: #666; text-align: right; min-height: 1.2em; }
+        .status-msg { font-size: 0.8rem; color: #666; text-align: center; min-height: 1.2em; margin-top: 5px;}
     </style>
 </head>
 <body>
@@ -152,16 +184,22 @@
     <div class="controls">
         <button id="spinBtn" onclick="spin()" disabled>読み込み中...</button>
         
-        <details id="editDetails">
-            <summary>メニューリストを編集・閲覧</summary>
+        <div class="quick-add">
+            <div style="font-size:0.8rem; color:#666; margin-bottom:5px;">メニューを追加 (スペース区切りで複数可)</div>
+            <div class="input-group">
+                <input type="text" id="quickInput" placeholder="例: カレー ラーメン">
+                <button id="addBtn" onclick="addItems()">追加</button>
+            </div>
+        </div>
+
+        <div id="statusMsg" class="status-msg"></div>
+
+        <details>
+            <summary>メニューリストを閲覧・編集</summary>
             <div class="edit-area">
-                <div style="font-size:0.8rem; color:#888;">
-                    改行で区切って入力してください。<br>「保存」を押すとスプレッドシートも更新されます。
-                </div>
-                <textarea id="menuTextarea" placeholder="読み込み中..."></textarea>
-                <div id="statusMsg" class="status-msg"></div>
+                <textarea id="menuTextarea"></textarea>
                 <div class="action-btns">
-                    <button class="save-btn" id="saveBtn" onclick="saveAllMenu()">全データを保存して更新</button>
+                    <button class="save-btn" id="saveBtn" onclick="saveAllMenu()">リストを保存して更新</button>
                 </div>
             </div>
         </details>
@@ -169,7 +207,7 @@
 
     <script>
         // ==========================================
-        // ↓↓↓ ここにGASのウェブアプリURLを貼ってください ↓↓↓
+        // ↓↓↓ ここにGASのURLを貼ってください ↓↓↓
         const API_URL = "https://script.google.com/macros/s/AKfycbxYU09ah3StJWFfC5JQvNkli8-kvZYHNoVGK9LYf2KyP7P_GFN0NR30-qegd6cXLMwS9g/exec"; 
         // ==========================================
 
@@ -179,99 +217,108 @@
         const spinBtn = document.getElementById('spinBtn');
         const resultText = document.getElementById('resultText');
         const menuTextarea = document.getElementById('menuTextarea');
-        const saveBtn = document.getElementById('saveBtn');
         const statusMsg = document.getElementById('statusMsg');
+        const quickInput = document.getElementById('quickInput');
+        const addBtn = document.getElementById('addBtn');
+        const saveBtn = document.getElementById('saveBtn');
 
         let currentAngle = 0;
         let isSpinning = false;
         const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE'];
 
-        // データの読み込み (GET)
+        // --- データの読み込み ---
         async function loadMenu() {
             try {
-                saveBtn.disabled = true;
+                disableControls(true);
                 statusMsg.innerText = "データを取得中...";
                 
                 const response = await fetch(API_URL);
                 const data = await response.json();
                 
                 items = data;
-                
-                // テキストエリアに反映（改行区切り）
                 menuTextarea.value = items.join("\n");
 
                 if (items.length < 2) {
                     statusMsg.innerText = "メニューが少なすぎます";
-                    resultText.innerText = "メニューを追加してください";
                 } else {
-                    statusMsg.innerText = `取得完了: ${items.length}件`;
-                    spinBtn.disabled = false;
-                    spinBtn.innerText = "START";
+                    statusMsg.innerText = `現在のメニュー数: ${items.length}品`;
                     drawWheel();
                 }
-                saveBtn.disabled = false;
+                disableControls(false);
 
             } catch (error) {
                 console.error(error);
                 statusMsg.innerText = "読み込み失敗";
-                resultText.innerText = "通信エラー";
+                disableControls(false);
             }
         }
 
-        // 全データの保存 (POST: replaceアクション)
+        // --- クイック追加（複数対応） ---
+        async function addItems() {
+            const val = quickInput.value.trim();
+            if (!val) return;
+
+            // スペース(全角半角)、コンマ、改行で分割して配列にする
+            const newItems = val.split(/[ 、,\n]+/).filter(s => s !== "");
+            if (newItems.length === 0) return;
+
+            // 現在のリストと合体させる
+            const currentList = menuTextarea.value.split("\n").map(s => s.trim()).filter(s => s !== "");
+            const mergedList = [...currentList, ...newItems];
+
+            // 一括保存処理へ回す（GASのreplace機能を使う）
+            statusMsg.innerText = `${newItems.length}件を追加中...`;
+            await pushData(mergedList);
+            
+            quickInput.value = ""; // 入力欄をクリア
+        }
+
+        // --- 全保存 ---
         async function saveAllMenu() {
             const rawText = menuTextarea.value;
-            // 空行を除去して配列化
             const newItems = rawText.split("\n").map(s => s.trim()).filter(s => s !== "");
-
-            if (newItems.length < 2) {
-                alert("メニューは最低2つ以上登録してください");
-                return;
+            
+            if (confirm("現在のリスト内容で上書き保存しますか？")) {
+                statusMsg.innerText = "保存中...";
+                await pushData(newItems);
             }
+        }
 
-            if (!confirm("現在のリストを上書き保存しますか？\n（スプレッドシートの内容も更新されます）")) {
-                return;
-            }
-
-            saveBtn.disabled = true;
-            saveBtn.innerText = "保存中...";
-            spinBtn.disabled = true;
-            statusMsg.innerText = "スプレッドシートに書き込み中...";
-
+        // --- データ送信処理 (共通) ---
+        async function pushData(newList) {
+            disableControls(true);
             try {
-                // replaceアクションを指定して送信
                 const response = await fetch(API_URL, {
                     method: 'POST',
                     body: JSON.stringify({ 
                         action: 'replace',
-                        menuList: newItems 
+                        menuList: newList 
                     })
                 });
                 
                 const result = await response.json();
-
                 if (result.success) {
-                    statusMsg.innerText = "保存完了！リストを更新しました";
-                    // 成功したら読み込み直してルーレット更新
+                    statusMsg.innerText = "更新しました！";
                     await loadMenu(); 
-                    saveBtn.innerText = "全データを保存して更新";
-                    // 編集エリアを閉じる（お好みで）
-                    // document.getElementById('editDetails').removeAttribute('open');
                 } else {
-                    alert("保存エラー: " + result.message);
-                    saveBtn.disabled = false;
-                    saveBtn.innerText = "全データを保存して更新";
+                    alert("エラー: " + result.message);
                 }
-
             } catch (error) {
                 console.error(error);
-                alert("通信エラーが発生しました");
-                saveBtn.disabled = false;
-                saveBtn.innerText = "全データを保存して更新";
+                statusMsg.innerText = "通信エラー";
+            } finally {
+                disableControls(false);
             }
         }
 
+        function disableControls(disabled) {
+            spinBtn.disabled = disabled;
+            addBtn.disabled = disabled;
+            saveBtn.disabled = disabled;
+        }
+
         function drawWheel() {
+            if (items.length === 0) return;
             const arc = 2 * Math.PI / items.length;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             const radius = canvas.width / 2;
@@ -300,8 +347,7 @@
             if (isSpinning) return;
             isSpinning = true;
             resultText.innerText = "";
-            spinBtn.disabled = true;
-            saveBtn.disabled = true;
+            disableControls(true);
 
             const spinAngle = Math.random() * 2000 + 3000; 
             currentAngle += spinAngle;
@@ -309,8 +355,7 @@
 
             setTimeout(() => {
                 isSpinning = false;
-                spinBtn.disabled = false;
-                saveBtn.disabled = false;
+                disableControls(false);
                 
                 const degrees = currentAngle % 360;
                 const arc = 360 / items.length;
