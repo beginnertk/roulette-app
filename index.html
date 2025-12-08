@@ -68,7 +68,7 @@
             transition: transform 0.1s;
         }
         button#spinBtn:active { transform: scale(0.98); }
-        button:disabled { background-color: #ccc !important; cursor: wait; box-shadow: none; }
+        button:disabled { background-color: #ccc !important; cursor: not-allowed; box-shadow: none; }
 
         .result {
             margin-top: 10px;
@@ -79,7 +79,38 @@
             text-align: center;
         }
 
-        /* --- 新規追加エリア --- */
+        /* フィルターエリア */
+        .filter-area {
+            width: 100%;
+            background: #e1f5fe;
+            padding: 12px;
+            border-radius: 12px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .filter-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .filter-label {
+            font-size: 0.8rem;
+            font-weight: bold;
+            color: #0277bd;
+            width: 60px;
+        }
+        .filter-area select, .filter-area input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #b3e5fc;
+            border-radius: 5px;
+            font-size: 0.9rem;
+            outline: none;
+        }
+
+        /* クイック追加エリア */
         .quick-add {
             width: 100%;
             background: white;
@@ -112,7 +143,7 @@
         }
         button#addBtn:disabled { background-color: #a4a4f0; }
 
-        /* --- 編集・閲覧エリア --- */
+        /* 閲覧・編集エリア */
         details {
             width: 100%;
             background: white;
@@ -184,10 +215,28 @@
     <div class="controls">
         <button id="spinBtn" onclick="spin()" disabled>読み込み中...</button>
         
+        <div class="filter-area">
+            <div class="filter-row">
+                <div class="filter-label">ジャンル</div>
+                <select id="genreSelect" onchange="filterMenu()">
+                    <option value="all">指定なし (全て)</option>
+                    <option value="和食">和食</option>
+                    <option value="洋食">洋食</option>
+                    <option value="中華">中華</option>
+                    <option value="韓国">韓国</option>
+                    <option value="その他">その他</option>
+                </select>
+            </div>
+            <div class="filter-row">
+                <div class="filter-label">具材</div>
+                <input type="text" id="filterInput" placeholder="例: 卵 白米" oninput="filterMenu()">
+            </div>
+        </div>
+
         <div class="quick-add">
-            <div style="font-size:0.8rem; color:#666; margin-bottom:5px;">メニューを追加 (スペース区切りで複数可)</div>
+            <div style="font-size:0.8rem; color:#666; margin-bottom:5px;">メニューを追加 (全角/半角スペースで複数可)</div>
             <div class="input-group">
-                <input type="text" id="quickInput" placeholder="例: カレー ラーメン">
+                <input type="text" id="quickInput" placeholder="例: カレー　ラーメン">
                 <button id="addBtn" onclick="addItems()">追加</button>
             </div>
         </div>
@@ -211,7 +260,9 @@
         const API_URL = "https://script.google.com/macros/s/AKfycbxYU09ah3StJWFfC5JQvNkli8-kvZYHNoVGK9LYf2KyP7P_GFN0NR30-qegd6cXLMwS9g/exec"; 
         // ==========================================
 
-        let items = []; 
+        let allData = []; // 全データ（ジャンル・具材含む）
+        let activeItems = []; // 現在ルーレット対象のメニュー名リスト
+        
         const canvas = document.getElementById('wheelCanvas');
         const ctx = canvas.getContext('2d');
         const spinBtn = document.getElementById('spinBtn');
@@ -219,6 +270,10 @@
         const menuTextarea = document.getElementById('menuTextarea');
         const statusMsg = document.getElementById('statusMsg');
         const quickInput = document.getElementById('quickInput');
+        
+        const genreSelect = document.getElementById('genreSelect');
+        const filterInput = document.getElementById('filterInput');
+        
         const addBtn = document.getElementById('addBtn');
         const saveBtn = document.getElementById('saveBtn');
 
@@ -235,15 +290,16 @@
                 const response = await fetch(API_URL);
                 const data = await response.json();
                 
-                items = data;
-                menuTextarea.value = items.join("\n");
+                // データ形式: [{name: "豚丼", genre: "和食", ingredients: "豚肉,白米"}, ...]
+                allData = data;
+                
+                // テキストエリア用には名前だけ抽出
+                const namesOnly = allData.map(d => d.name);
+                menuTextarea.value = namesOnly.join("\n");
+                
+                // フィルターを再適用して描画
+                filterMenu();
 
-                if (items.length < 2) {
-                    statusMsg.innerText = "メニューが少なすぎます";
-                } else {
-                    statusMsg.innerText = `現在のメニュー数: ${items.length}品`;
-                    drawWheel();
-                }
                 disableControls(false);
 
             } catch (error) {
@@ -253,24 +309,59 @@
             }
         }
 
-        // --- クイック追加（複数対応） ---
+        // --- フィルター処理 (ジャンル AND 具材) ---
+        function filterMenu() {
+            const selectedGenre = genreSelect.value;
+            const ingredientKeyword = filterInput.value.trim();
+            
+            // キーワード分割 (全角スペース対応)
+            const keywords = ingredientKeyword.split(/[ 　]+/).filter(k => k !== "");
+
+            const filtered = allData.filter(item => {
+                // 1. ジャンル判定
+                const isGenreMatch = (selectedGenre === "all") || (item.genre === selectedGenre);
+                
+                // 2. 具材キーワード判定 (AND検索)
+                // メニュー名か具材のどちらかにキーワードが含まれていればOK
+                const targetText = (item.name + " " + item.ingredients).toLowerCase();
+                const isIngredientMatch = keywords.every(k => targetText.includes(k.toLowerCase()));
+
+                return isGenreMatch && isIngredientMatch;
+            });
+
+            applyFilter(filtered.map(d => d.name));
+        }
+
+        function applyFilter(namesList) {
+            activeItems = namesList;
+            if (activeItems.length < 2) {
+                statusMsg.innerText = `該当メニューが少なすぎます (${activeItems.length}件)`;
+                spinBtn.disabled = true;
+                if(activeItems.length > 0) drawWheel();
+                else ctx.clearRect(0, 0, canvas.width, canvas.height);
+            } else {
+                statusMsg.innerText = `現在の対象メニュー: ${activeItems.length}品`;
+                spinBtn.disabled = false;
+                drawWheel();
+            }
+        }
+
+        // --- クイック追加（全角スペース対応） ---
         async function addItems() {
             const val = quickInput.value.trim();
             if (!val) return;
 
-            // スペース(全角半角)、コンマ、改行で分割して配列にする
-            const newItems = val.split(/[ 、,\n]+/).filter(s => s !== "");
+            // 全角・半角スペース・コンマ・改行で分割
+            const newItems = val.split(/[ 　、,\n]+/).filter(s => s !== "");
             if (newItems.length === 0) return;
 
-            // 現在のリストと合体させる
-            const currentList = menuTextarea.value.split("\n").map(s => s.trim()).filter(s => s !== "");
-            const mergedList = [...currentList, ...newItems];
-
-            // 一括保存処理へ回す（GASのreplace機能を使う）
             statusMsg.innerText = `${newItems.length}件を追加中...`;
-            await pushData(mergedList);
             
-            quickInput.value = ""; // 入力欄をクリア
+            // 送信
+            const currentNames = menuTextarea.value.split("\n").map(s => s.trim()).filter(s => s !== "");
+            const mergedList = [...currentNames, ...newItems];
+            await pushData(mergedList);
+            quickInput.value = ""; 
         }
 
         // --- 全保存 ---
@@ -278,13 +369,13 @@
             const rawText = menuTextarea.value;
             const newItems = rawText.split("\n").map(s => s.trim()).filter(s => s !== "");
             
-            if (confirm("現在のリスト内容で上書き保存しますか？")) {
+            if (confirm("現在のリスト内容で上書き保存しますか？\n（メニュー名以外のジャンル・具材情報は維持されますが、ここから削除したメニューの付帯情報は消える可能性があります）")) {
                 statusMsg.innerText = "保存中...";
                 await pushData(newItems);
             }
         }
 
-        // --- データ送信処理 (共通) ---
+        // --- データ送信処理 ---
         async function pushData(newList) {
             disableControls(true);
             try {
@@ -300,6 +391,8 @@
                 if (result.success) {
                     statusMsg.innerText = "更新しました！";
                     await loadMenu(); 
+                    // フィルターはリセットしないほうが親切かもですが、データ整合性のため一旦クリアも手
+                    // 今回は入力状態はそのままにして再計算されるようにしています
                 } else {
                     alert("エラー: " + result.message);
                 }
@@ -318,14 +411,14 @@
         }
 
         function drawWheel() {
-            if (items.length === 0) return;
-            const arc = 2 * Math.PI / items.length;
+            if (activeItems.length === 0) return;
+            const arc = 2 * Math.PI / activeItems.length;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             const radius = canvas.width / 2;
             const centerX = canvas.width / 2;
             const centerY = canvas.height / 2;
 
-            items.forEach((item, i) => {
+            activeItems.forEach((item, i) => {
                 const angle = i * arc;
                 ctx.beginPath();
                 ctx.fillStyle = colors[i % colors.length];
@@ -358,10 +451,12 @@
                 disableControls(false);
                 
                 const degrees = currentAngle % 360;
-                const arc = 360 / items.length;
+                const arc = 360 / activeItems.length;
                 const index = Math.floor((360 - degrees + 90) % 360 / arc); 
-                const winner = items[index >= items.length ? 0 : index]; 
-                resultText.innerText = "今夜は「" + winner + "」";
+                const winner = activeItems[index >= activeItems.length ? 0 : index]; 
+                
+                // ★文言変更
+                resultText.innerText = "選ばれたのは...「" + winner + "」でした。";
             }, 4000);
         }
 
