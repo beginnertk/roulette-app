@@ -253,8 +253,7 @@
             </div>
         </details>
     </div>
-
-    <script>
+<script>
         // ==========================================
         // ↓↓↓ ここにGASのURLを貼ってください ↓↓↓
         const API_URL = "https://script.google.com/macros/s/AKfycbxYU09ah3StJWFfC5JQvNkli8-kvZYHNoVGK9LYf2KyP7P_GFN0NR30-qegd6cXLMwS9g/exec"; 
@@ -281,17 +280,9 @@
         let isSpinning = false;
 
         const rainbowColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE'];
-        
-        // ジャンル別カラー設定
         const genreColors = {
-            "和食": "#5D9CEC", 
-            "洋食": "#F0AD4E", 
-            "中華": "#D9534F", 
-            "韓国": "#967ADC", 
-            "その他": "#AAB2BD" 
+            "和食": "#5D9CEC", "洋食": "#F0AD4E", "中華": "#D9534F", "韓国": "#967ADC", "その他": "#AAB2BD" 
         };
-
-        // 並び順の定義（この順番でルーレットに並びます）
         const genreOrder = ["和食", "洋食", "中華", "韓国", "その他"];
 
         // --- データの読み込み ---
@@ -299,19 +290,15 @@
             try {
                 disableControls(true);
                 statusMsg.innerText = "データを取得中...";
-                
                 const response = await fetch(API_URL);
                 const data = await response.json();
-                
                 allData = data;
                 
-                // テキストエリア表示用
                 const namesOnly = allData.map(d => d.name);
                 menuTextarea.value = namesOnly.join("\n");
                 
                 filterMenu();
                 disableControls(false);
-
             } catch (error) {
                 console.error(error);
                 statusMsg.innerText = "読み込み失敗";
@@ -325,7 +312,6 @@
             const ingredientKeyword = filterInput.value.trim();
             const keywords = ingredientKeyword.split(/[ 　]+/).filter(k => k !== "");
 
-            // 1. 絞り込み
             let filtered = allData.filter(item => {
                 const isGenreMatch = (selectedGenre === "all") || (item.genre === selectedGenre);
                 const targetText = (item.name + " " + item.ingredients).toLowerCase();
@@ -333,21 +319,12 @@
                 return isGenreMatch && isIngredientMatch;
             });
 
-            // 2. ソート（ジャンルごとに固める）
-            // 指定なし(all)の時だけジャンル順に並べる。指定ありの時はそのまま（あいうえお順等）でもOKだが、
-            // 見栄えのために常にジャンル順→名前順にしておくと綺麗。
             filtered.sort((a, b) => {
-                // まずジャンル順
                 const indexA = genreOrder.indexOf(a.genre);
                 const indexB = genreOrder.indexOf(b.genre);
-                // 定義にないジャンルは末尾へ
                 const safeIndexA = indexA === -1 ? 999 : indexA;
                 const safeIndexB = indexB === -1 ? 999 : indexB;
-                
-                if (safeIndexA !== safeIndexB) {
-                    return safeIndexA - safeIndexB;
-                }
-                // ジャンルが同じなら名前順
+                if (safeIndexA !== safeIndexB) return safeIndexA - safeIndexB;
                 return a.name.localeCompare(b.name, "ja");
             });
 
@@ -356,66 +333,85 @@
 
         function applyFilter(filteredList) {
             activeItems = filteredList;
-            
             if (activeItems.length < 2) {
                 statusMsg.innerText = `該当メニューが少なすぎます (${activeItems.length}件)`;
                 spinBtn.disabled = true;
-                spinBtn.innerText = "メニュー不足"; // 文言変更
+                spinBtn.innerText = "メニュー不足";
                 if(activeItems.length > 0) drawWheel();
                 else ctx.clearRect(0, 0, canvas.width, canvas.height);
             } else {
                 statusMsg.innerText = `現在の対象メニュー: ${activeItems.length}品`;
                 spinBtn.disabled = false;
-                spinBtn.innerText = "回す！"; // ★文言変更（準備完了時）
+                spinBtn.innerText = "回す！";
                 drawWheel();
             }
         }
 
-        // --- クイック追加 ---
+        // --- ★修正版：AI分類付きクイック追加 ---
         async function addItems() {
             const val = quickInput.value.trim();
             if (!val) return;
             const newItems = val.split(/[ 　、,\n]+/).filter(s => s !== "");
             if (newItems.length === 0) return;
 
-            statusMsg.innerText = `${newItems.length}件を追加中...`;
+            // ボタンを無効化
+            disableControls(true);
             
-            const currentNames = menuTextarea.value.split("\n").map(s => s.trim()).filter(s => s !== "");
-            const mergedList = [...currentNames, ...newItems];
-            await pushData(mergedList);
+            // 1つずつAI分類リクエストを送る
+            // (GAS側が1回につき1つのメニュー分類に対応しているため)
+            for (let i = 0; i < newItems.length; i++) {
+                const item = newItems[i];
+                statusMsg.innerText = `AIが分類中... (${i + 1}/${newItems.length}): ${item}`;
+                
+                try {
+                    // "action"を指定しない＝GAS側でappendWithAIが動く
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({ menu: item })
+                    });
+                    const result = await response.json();
+                    
+                    if (!result.success) {
+                        console.error("追加エラー:", result.message);
+                        alert(`「${item}」の追加に失敗: ${result.message}`);
+                    }
+                } catch (error) {
+                    console.error(error);
+                    alert("通信エラーが発生しました");
+                }
+            }
+            
+            statusMsg.innerText = "完了！リストを更新します...";
             quickInput.value = ""; 
+            await loadMenu(); // リスト再取得
         }
 
-        // --- 全保存 ---
+        // --- 全保存（こちらは今まで通りAIなしで上書き） ---
         async function saveAllMenu() {
             const rawText = menuTextarea.value;
             const newItems = rawText.split("\n").map(s => s.trim()).filter(s => s !== "");
-            if (confirm("現在のリスト内容で上書き保存しますか？")) {
+            if (confirm("現在のリスト内容で上書き保存しますか？\n（注意: ここで編集して保存すると、AI分類は行われず、既存のジャンル情報は維持されますが、新規行は未分類になります）")) {
                 statusMsg.innerText = "保存中...";
-                await pushData(newItems);
-            }
-        }
-
-        // --- データ送信 ---
-        async function pushData(newList) {
-            disableControls(true);
-            try {
-                const response = await fetch(API_URL, {
-                    method: 'POST',
-                    body: JSON.stringify({ action: 'replace', menuList: newList })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    statusMsg.innerText = "更新しました！";
-                    await loadMenu(); 
-                } else {
-                    alert("エラー: " + result.message);
+                
+                disableControls(true);
+                try {
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({ action: 'replace', menuList: newItems })
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        statusMsg.innerText = "更新しました！";
+                        await loadMenu(); 
+                    } else {
+                        alert("エラー: " + result.message);
+                    }
+                } catch (error) {
+                    console.error(error);
+                    statusMsg.innerText = "通信エラー";
+                } finally {
+                    disableControls(false);
                 }
-            } catch (error) {
-                console.error(error);
-                statusMsg.innerText = "通信エラー";
-            } finally {
-                disableControls(false);
             }
         }
 
@@ -423,52 +419,37 @@
             spinBtn.disabled = disabled;
             addBtn.disabled = disabled;
             saveBtn.disabled = disabled;
-            
-            // ★文言変更ロジック
             if (disabled) {
-                // 回転中または処理中は「...」系にする
-                if (isSpinning) {
-                     spinBtn.innerText = "回転中...";
-                } else {
-                     spinBtn.innerText = "読み込み中...";
-                }
+                if (isSpinning) spinBtn.innerText = "回転中...";
+                else spinBtn.innerText = "読み込み中...";
             } else {
-                // 解除されたら「回す！」に戻す
                 spinBtn.innerText = "回す！";
             }
         }
 
-        // --- 描画関数 ---
         function drawWheel() {
             if (activeItems.length === 0) return;
             const arc = 2 * Math.PI / activeItems.length;
-            
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
             const radius = canvas.width / 2;
             const centerX = canvas.width / 2;
             const centerY = canvas.height / 2;
-            
             const isAllMode = (genreSelect.value === "all");
 
             activeItems.forEach((item, i) => {
                 const angle = i * arc;
                 ctx.beginPath();
-
                 if (isAllMode) {
                     ctx.fillStyle = genreColors[item.genre] || genreColors["その他"];
                 } else {
                     ctx.fillStyle = rainbowColors[i % rainbowColors.length];
                 }
-
                 ctx.moveTo(centerX, centerY);
                 ctx.arc(centerX, centerY, radius, angle, angle + arc);
                 ctx.fill();
-                
                 ctx.strokeStyle = "#ffffff"; 
                 ctx.lineWidth = 2;
                 ctx.stroke();
-
                 ctx.save();
                 ctx.translate(centerX, centerY);
                 ctx.rotate(angle + arc / 2);
@@ -480,32 +461,25 @@
             });
         }
 
-        // --- 回転処理 ---
         function spin() {
             if (isSpinning) return;
             isSpinning = true;
             resultText.innerText = "";
-            disableControls(true); // ここで「回転中...」になる
-
+            disableControls(true);
             const spinAngle = Math.random() * 2000 + 3000; 
             currentAngle += spinAngle;
             canvas.style.transform = `rotate(-${currentAngle}deg)`;
 
             setTimeout(() => {
                 isSpinning = false;
-                disableControls(false); // ここで「回す！」に戻る
-                
+                disableControls(false);
                 const arcDegrees = 360 / activeItems.length;
                 const effectiveAngle = (270 + currentAngle) % 360;
                 const index = Math.floor(effectiveAngle / arcDegrees) % activeItems.length;
-                
                 const winner = activeItems[index].name;
-                
                 resultText.innerText = "選ばれたのは...「" + winner + "」でした。";
             }, 4000);
         }
 
         loadMenu();
     </script>
-</body>
-</html>
