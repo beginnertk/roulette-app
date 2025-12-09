@@ -390,7 +390,7 @@
         async function saveAllMenu() {
             const rawText = menuTextarea.value;
             const newItems = rawText.split("\n").map(s => s.trim()).filter(s => s !== "");
-            if (confirm("現在のリスト内容で上書き保存しますか？\n（注意: ここで編集して保存すると、AI分類は行われず、既存のジャンル情報は維持されますが、新規行は未分類になります）")) {
+            if (confirm("現在のリスト内容で上書き保存しますか？\n（新規メニューはAIが自動分類します！）")) {
                 statusMsg.innerText = "保存中...";
                 
                 disableControls(true);
@@ -483,3 +483,4 @@
 
         loadMenu();
     </script>
+
