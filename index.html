@@ -260,7 +260,7 @@
         const API_URL = "https://script.google.com/macros/s/AKfycbxYU09ah3StJWFfC5JQvNkli8-kvZYHNoVGK9LYf2KyP7P_GFN0NR30-qegd6cXLMwS9g/exec"; 
         // ==========================================
 
-        let allData = []; // 全データ（ジャンル・具材含む）
+        let allData = []; // 全データ
         let activeItems = []; // 現在ルーレット対象のメニュー名リスト
         
         const canvas = document.getElementById('wheelCanvas');
@@ -322,7 +322,6 @@
                 const isGenreMatch = (selectedGenre === "all") || (item.genre === selectedGenre);
                 
                 // 2. 具材キーワード判定 (AND検索)
-                // メニュー名か具材のどちらかにキーワードが含まれていればOK
                 const targetText = (item.name + " " + item.ingredients).toLowerCase();
                 const isIngredientMatch = keywords.every(k => targetText.includes(k.toLowerCase()));
 
@@ -357,7 +356,7 @@
 
             statusMsg.innerText = `${newItems.length}件を追加中...`;
             
-            // 送信
+            // UI上は仮で追加して見せる
             const currentNames = menuTextarea.value.split("\n").map(s => s.trim()).filter(s => s !== "");
             const mergedList = [...currentNames, ...newItems];
             await pushData(mergedList);
@@ -391,8 +390,6 @@
                 if (result.success) {
                     statusMsg.innerText = "更新しました！";
                     await loadMenu(); 
-                    // フィルターはリセットしないほうが親切かもですが、データ整合性のため一旦クリアも手
-                    // 今回は入力状態はそのままにして再計算されるようにしています
                 } else {
                     alert("エラー: " + result.message);
                 }
@@ -410,6 +407,7 @@
             saveBtn.disabled = disabled;
         }
 
+        // --- 描画ロジック ---
         function drawWheel() {
             if (activeItems.length === 0) return;
             const arc = 2 * Math.PI / activeItems.length;
@@ -436,12 +434,14 @@
             });
         }
 
+        // --- ルーレット回転ロジック（修正済み） ---
         function spin() {
             if (isSpinning) return;
             isSpinning = true;
             resultText.innerText = "";
             disableControls(true);
 
+            // 最低3000度以上回す
             const spinAngle = Math.random() * 2000 + 3000; 
             currentAngle += spinAngle;
             canvas.style.transform = `rotate(-${currentAngle}deg)`;
@@ -450,12 +450,14 @@
                 isSpinning = false;
                 disableControls(false);
                 
-                const degrees = currentAngle % 360;
-                const arc = 360 / activeItems.length;
-                const index = Math.floor((360 - degrees + 90) % 360 / arc); 
-                const winner = activeItems[index >= activeItems.length ? 0 : index]; 
+                // 針（上=270度）の位置にあるアイテムを計算
+                // キャンバスの回転角度と針の位置から逆算
+                const arcDegrees = 360 / activeItems.length;
+                const effectiveAngle = (270 + currentAngle) % 360;
+                const index = Math.floor(effectiveAngle / arcDegrees) % activeItems.length;
                 
-                // ★文言変更
+                const winner = activeItems[index];
+                
                 resultText.innerText = "選ばれたのは...「" + winner + "」でした。";
             }, 4000);
         }
