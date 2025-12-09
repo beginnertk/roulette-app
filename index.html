@@ -65,7 +65,7 @@
             border-radius: 50px;
             cursor: pointer;
             box-shadow: 0 4px 10px rgba(46, 213, 115, 0.3);
-            transition: transform 0.1s;
+            transition: transform 0.1s, background-color 0.3s;
         }
         button#spinBtn:active { transform: scale(0.98); }
         button:disabled { background-color: #ccc !important; cursor: not-allowed; box-shadow: none; }
@@ -253,14 +253,15 @@
             </div>
         </details>
     </div>
-<script>
+
+    <script>
         // ==========================================
         // ↓↓↓ ここにGASのURLを貼ってください ↓↓↓
         const API_URL = "https://script.google.com/macros/s/AKfycbxYU09ah3StJWFfC5JQvNkli8-kvZYHNoVGK9LYf2KyP7P_GFN0NR30-qegd6cXLMwS9g/exec"; 
         // ==========================================
 
         let allData = []; 
-        let activeItems = []; // ★変更: 文字列配列ではなく、オブジェクト配列[{name, genre...}]にします
+        let activeItems = []; 
         
         const canvas = document.getElementById('wheelCanvas');
         const ctx = canvas.getContext('2d');
@@ -279,17 +280,19 @@
         let currentAngle = 0;
         let isSpinning = false;
 
-        // 基本のパレット（絞り込み時用）
         const rainbowColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE'];
         
-        // ジャンル別カラー設定（全表示時用）
+        // ジャンル別カラー設定
         const genreColors = {
-            "和食": "#5D9CEC", // 落ち着いた青
-            "洋食": "#F0AD4E", // オレンジ
-            "中華": "#D9534F", // 赤
-            "韓国": "#967ADC", // 紫
-            "その他": "#AAB2BD" // グレー
+            "和食": "#5D9CEC", 
+            "洋食": "#F0AD4E", 
+            "中華": "#D9534F", 
+            "韓国": "#967ADC", 
+            "その他": "#AAB2BD" 
         };
+
+        // 並び順の定義（この順番でルーレットに並びます）
+        const genreOrder = ["和食", "洋食", "中華", "韓国", "その他"];
 
         // --- データの読み込み ---
         async function loadMenu() {
@@ -322,14 +325,32 @@
             const ingredientKeyword = filterInput.value.trim();
             const keywords = ingredientKeyword.split(/[ 　]+/).filter(k => k !== "");
 
-            const filtered = allData.filter(item => {
+            // 1. 絞り込み
+            let filtered = allData.filter(item => {
                 const isGenreMatch = (selectedGenre === "all") || (item.genre === selectedGenre);
                 const targetText = (item.name + " " + item.ingredients).toLowerCase();
                 const isIngredientMatch = keywords.every(k => targetText.includes(k.toLowerCase()));
                 return isGenreMatch && isIngredientMatch;
             });
 
-            // ★変更: 名前だけ抽出せず、オブジェクトのまま渡す
+            // 2. ソート（ジャンルごとに固める）
+            // 指定なし(all)の時だけジャンル順に並べる。指定ありの時はそのまま（あいうえお順等）でもOKだが、
+            // 見栄えのために常にジャンル順→名前順にしておくと綺麗。
+            filtered.sort((a, b) => {
+                // まずジャンル順
+                const indexA = genreOrder.indexOf(a.genre);
+                const indexB = genreOrder.indexOf(b.genre);
+                // 定義にないジャンルは末尾へ
+                const safeIndexA = indexA === -1 ? 999 : indexA;
+                const safeIndexB = indexB === -1 ? 999 : indexB;
+                
+                if (safeIndexA !== safeIndexB) {
+                    return safeIndexA - safeIndexB;
+                }
+                // ジャンルが同じなら名前順
+                return a.name.localeCompare(b.name, "ja");
+            });
+
             applyFilter(filtered);
         }
 
@@ -339,11 +360,13 @@
             if (activeItems.length < 2) {
                 statusMsg.innerText = `該当メニューが少なすぎます (${activeItems.length}件)`;
                 spinBtn.disabled = true;
+                spinBtn.innerText = "メニュー不足"; // 文言変更
                 if(activeItems.length > 0) drawWheel();
                 else ctx.clearRect(0, 0, canvas.width, canvas.height);
             } else {
                 statusMsg.innerText = `現在の対象メニュー: ${activeItems.length}品`;
                 spinBtn.disabled = false;
+                spinBtn.innerText = "回す！"; // ★文言変更（準備完了時）
                 drawWheel();
             }
         }
@@ -357,7 +380,6 @@
 
             statusMsg.innerText = `${newItems.length}件を追加中...`;
             
-            // 現在のテキストエリアの内容をベースにマージ
             const currentNames = menuTextarea.value.split("\n").map(s => s.trim()).filter(s => s !== "");
             const mergedList = [...currentNames, ...newItems];
             await pushData(mergedList);
@@ -401,9 +423,22 @@
             spinBtn.disabled = disabled;
             addBtn.disabled = disabled;
             saveBtn.disabled = disabled;
+            
+            // ★文言変更ロジック
+            if (disabled) {
+                // 回転中または処理中は「...」系にする
+                if (isSpinning) {
+                     spinBtn.innerText = "回転中...";
+                } else {
+                     spinBtn.innerText = "読み込み中...";
+                }
+            } else {
+                // 解除されたら「回す！」に戻す
+                spinBtn.innerText = "回す！";
+            }
         }
 
-        // --- ★色分けロジック改良版 描画関数★ ---
+        // --- 描画関数 ---
         function drawWheel() {
             if (activeItems.length === 0) return;
             const arc = 2 * Math.PI / activeItems.length;
@@ -414,19 +449,15 @@
             const centerX = canvas.width / 2;
             const centerY = canvas.height / 2;
             
-            // 現在「全て」モードか、「絞り込み」モードか判定
             const isAllMode = (genreSelect.value === "all");
 
             activeItems.forEach((item, i) => {
                 const angle = i * arc;
                 ctx.beginPath();
 
-                // ★ここがポイント: 色の決定ロジック
                 if (isAllMode) {
-                    // 全表示モードなら「ジャンルごとの色」を使う
                     ctx.fillStyle = genreColors[item.genre] || genreColors["その他"];
                 } else {
-                    // 絞り込みモードなら「虹色パレット」を使って華やかにする
                     ctx.fillStyle = rainbowColors[i % rainbowColors.length];
                 }
 
@@ -434,7 +465,6 @@
                 ctx.arc(centerX, centerY, radius, angle, angle + arc);
                 ctx.fill();
                 
-                // ★追加: 境界線（白線）を描画して、同色が隣り合っても区切れるようにする
                 ctx.strokeStyle = "#ffffff"; 
                 ctx.lineWidth = 2;
                 ctx.stroke();
@@ -445,18 +475,17 @@
                 ctx.textAlign = "right";
                 ctx.fillStyle = "#fff";
                 ctx.font = "bold 18px Helvetica";
-                // ★変更: itemはオブジェクトになったので item.name を表示
                 ctx.fillText(item.name, radius - 20, 10);
                 ctx.restore();
             });
         }
 
-        // --- ルーレット回転 ---
+        // --- 回転処理 ---
         function spin() {
             if (isSpinning) return;
             isSpinning = true;
             resultText.innerText = "";
-            disableControls(true);
+            disableControls(true); // ここで「回転中...」になる
 
             const spinAngle = Math.random() * 2000 + 3000; 
             currentAngle += spinAngle;
@@ -464,13 +493,12 @@
 
             setTimeout(() => {
                 isSpinning = false;
-                disableControls(false);
+                disableControls(false); // ここで「回す！」に戻る
                 
                 const arcDegrees = 360 / activeItems.length;
                 const effectiveAngle = (270 + currentAngle) % 360;
                 const index = Math.floor(effectiveAngle / arcDegrees) % activeItems.length;
                 
-                // ★変更: itemはオブジェクトなので item.name を取得
                 const winner = activeItems[index].name;
                 
                 resultText.innerText = "選ばれたのは...「" + winner + "」でした。";
@@ -479,3 +507,5 @@
 
         loadMenu();
     </script>
+</body>
+</html>
